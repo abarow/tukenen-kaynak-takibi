@@ -1,0 +1,4 @@
+# Depoda tum metin dosyalari LF satir sonuyla tutulur (Go, SQL, Docker icin tutarli).
+* text=auto eol=lf
+*.png binary
+*.svg text eol=lf

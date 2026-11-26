@@ -1,0 +1,5 @@
+**/node_modules
+frontend/.svelte-kit
+backend/bin
+backend/internal/web/dist
+.git

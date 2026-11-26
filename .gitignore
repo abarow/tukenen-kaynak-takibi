@@ -1,0 +1,13 @@
+# Go
+backend/bin/
+
+# Derlenmiş arayüz (npm run build üretir); klasörün kendisi go:embed için tutulur
+backend/internal/web/dist/*
+!backend/internal/web/dist/.gitkeep
+
+# Node / SvelteKit
+node_modules/
+frontend/.svelte-kit/
+
+.env
+*.log
