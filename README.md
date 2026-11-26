@@ -1,7 +1,8 @@
-# Kaynak — Kısıtlı Kaynak Yönetimi
+# Tükenen Kaynak Takibi
 
 Barkod numarası aralığı, ISBN bloğu, MAC adresi bloğu, fatura/seri numarası gibi **sayısı sınırlı ve
-tekrar kullanılması riskli** kaynakları nesnelerle (ürün, kitap, cihaz, sanal makine, belge…) eşleştiren uygulama.
+tekrar kullanılması riskli** kaynakları nesnelerle (ürün, kitap, cihaz, sanal makine, belge…) eşleştiren ve
+ne kadarının tükendiğini takip eden uygulama: her havuzun kapasitesi, kalan değer sayısı ve azalma uyarısı.
 
 - **Backend:** Go (stdlib `net/http` + `pgx`), tek ikili dosya, arayüz içine gömülü
 - **Frontend:** SvelteKit 3 / Svelte 5 (SPA, `adapter-static`)

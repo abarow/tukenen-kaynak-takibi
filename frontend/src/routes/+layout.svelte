@@ -24,7 +24,7 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>Kaynak Yönetimi</title>
+	<title>Tükenen Kaynak Takibi</title>
 </svelte:head>
 
 <div class="shell">
@@ -38,7 +38,7 @@
 				<rect x="17" y="5" width="2" height="14" fill="currentColor" />
 				<rect x="21" y="5" width="1" height="14" fill="currentColor" />
 			</svg>
-			<span>Kaynak</span>
+			<span>Tükenen Kaynak Takibi</span>
 		</a>
 		<nav>
 			{#each nav as item (item.href)}
@@ -94,10 +94,15 @@
 		align-items: center;
 		gap: 10px;
 		font-weight: 700;
-		font-size: 17px;
+		font-size: 16px;
+		line-height: 1.2;
+		text-wrap: balance;
 		color: var(--text);
 		padding: 0 8px;
 		text-decoration: none;
+	}
+	.brand svg {
+		flex: none;
 	}
 	nav {
 		display: flex;
