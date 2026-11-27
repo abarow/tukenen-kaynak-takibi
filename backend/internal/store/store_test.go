@@ -1,3 +1,6 @@
+// Copyright 2026 Mehmet ERGULCU and the abarow contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package store
 
 // Entegrasyon testleri gerçek PostgreSQL ister:
@@ -11,8 +14,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -282,6 +287,59 @@ func TestMigrationRenamesRuleFunctions(t *testing.T) {
 	}
 	if v := kinds.NewCustomCodec(s).Format(12345678); v != "123456780180" {
 		t.Fatalf("çevrilen tanım aynı kodu üretmeli: %s", v)
+	}
+}
+
+// Birden çok düğümde görülen durum: toplu istekler ve tekil istekler aynı nesneleri farklı
+// sırada ister. Eskiden toplu istek aralık kilidini tutarken bir nesne kilidini, tekil istek
+// o nesne kilidini tutarken aralık kilidini bekliyor ve PostgreSQL birini "deadlock" ile
+// iptal ediyordu. Kilitler artık sıralı alındığı için kilitlenme hiç oluşmamalı.
+func TestBulkAndSingleOverlapDoNotDeadlock(t *testing.T) {
+	ctx := context.Background()
+	st, p := newSeqPool(t, 100_000, ReuseNever)
+	shared := make([]string, 25)
+	for i := range shared {
+		shared[i] = fmt.Sprintf("ortak-%d", i)
+	}
+	before := txRetries.Load()
+
+	var wg sync.WaitGroup
+	var failures atomic.Int64
+	for b := range 30 {
+		wg.Go(func() {
+			refs := slices.Clone(shared)
+			rand.Shuffle(len(refs), func(i, j int) { refs[i], refs[j] = refs[j], refs[i] })
+			items := []AllocateRequest{}
+			for _, r := range refs[:12] {
+				items = append(items, AllocateRequest{ObjectType: "t", ObjectRef: r})
+			}
+			for j := range 8 {
+				items = append(items, AllocateRequest{ObjectType: "t", ObjectRef: fmt.Sprintf("toplu-%d-%d", b, j)})
+			}
+			if _, err := st.AllocateBulk(ctx, p.ID, items, "test"); err != nil {
+				failures.Add(1)
+				t.Errorf("toplu: %v", err)
+			}
+		})
+	}
+	for s := range 150 {
+		wg.Go(func() {
+			if _, _, err := st.Allocate(ctx, p.ID, AllocateRequest{ObjectType: "t", ObjectRef: shared[s%len(shared)]}, "test"); err != nil {
+				failures.Add(1)
+				t.Errorf("tekil: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	if failures.Load() > 0 {
+		t.Fatalf("%d istek başarısız", failures.Load())
+	}
+	if n := txRetries.Load() - before; n != 0 {
+		t.Fatalf("kilitlenme önlenmeliydi, ama %d kez tekrar denemeye düşüldü", n)
+	}
+	got, _ := st.GetPool(ctx, p.ID)
+	if want := int64(len(shared) + 30*8); got.Stats.Assigned != want {
+		t.Fatalf("her nesne tam bir değer almalı: %d, beklenen %d", got.Stats.Assigned, want)
 	}
 }
 

@@ -1,3 +1,6 @@
+// Copyright 2026 Mehmet ERGULCU and the abarow contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package store
 
 import (
@@ -5,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -93,7 +98,7 @@ func (s *Store) Allocate(ctx context.Context, poolID int64, req AllocateRequest,
 	}
 	var out *Allocation
 	var created bool
-	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		p, err := activePoolTx(ctx, tx, poolID)
 		if err != nil {
 			return err
@@ -102,6 +107,15 @@ func (s *Store) Allocate(ctx context.Context, poolID int64, req AllocateRequest,
 		return err
 	})
 	return out, created, err
+}
+
+// objectLockID bir (havuz, nesne) çifti için advisory lock kimliği. Bütün düğümler aynı
+// kimliği hesapladığı için kilit veritabanı üzerinden tüm sunucu örneklerinde geçerlidir.
+// Çakışma (iki nesnenin aynı kimliğe düşmesi) yalnızca gereksiz bekleme yaratır, hata değil.
+func objectLockID(poolID int64, objectType, objectRef string) int64 {
+	h := fnv.New64a()
+	fmt.Fprintf(h, "alloc|%d|%s|%s", poolID, objectType, objectRef)
+	return int64(h.Sum64())
 }
 
 type BulkResult struct {
@@ -119,10 +133,25 @@ func (s *Store) AllocateBulk(ctx context.Context, poolID int64, reqs []AllocateR
 			return nil, invalidf("%d. kalem: %s", i+1, err.Error())
 		}
 	}
-	out := make([]BulkResult, 0, len(reqs))
-	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+	// Kilitlenmeyi (deadlock) önlemek için bütün nesne kilitleri, aralık kilidine dokunmadan
+	// önce ve her işlemde aynı sırayla (küçükten büyüğe) alınır. Aksi hâlde "toplu istek
+	// aralığı tutarken X nesnesini bekler, tekil istek X'i tutarken aralığı bekler" döngüsü oluşur.
+	ids := make([]int64, 0, len(reqs))
+	for _, r := range reqs {
+		ids = append(ids, objectLockID(poolID, r.ObjectType, r.ObjectRef))
+	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+
+	var out []BulkResult
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		out = make([]BulkResult, 0, len(reqs)) // tekrar denemede baştan
 		p, err := activePoolTx(ctx, tx, poolID)
 		if err != nil {
+			return err
+		}
+		// unnest dizinin sırasını korur; kilitler sıralı alınır.
+		if _, err := tx.Exec(ctx, `SELECT count(pg_advisory_xact_lock(id)) FROM unnest($1::bigint[]) AS id`, ids); err != nil {
 			return err
 		}
 		for i, r := range reqs {
@@ -175,10 +204,10 @@ func allocateTx(ctx context.Context, tx pgx.Tx, p *Pool, req AllocateRequest, ac
 		wantBase = b
 	}
 
-	// Aynı nesne için eşzamanlı gelen istekleri sıraya sok. Kilit transaction
-	// sonunda kendiliğinden bırakılır.
-	lockKey := fmt.Sprintf("alloc|%d|%s|%s", p.ID, req.ObjectType, req.ObjectRef)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+	// Aynı nesne için eşzamanlı gelen istekleri (hangi düğüme gelirse gelsin) sıraya sok.
+	// Kilit transaction sonunda kendiliğinden bırakılır; toplu istekte zaten alınmışsa tekrar
+	// almak sorun değildir (aynı oturumda yeniden girilebilir).
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, objectLockID(p.ID, req.ObjectType, req.ObjectRef)); err != nil {
 		return nil, false, err
 	}
 
@@ -369,7 +398,7 @@ func insertEvent(ctx context.Context, tx pgx.Tx, a *Allocation, action, fromStat
 // Confirm rezervasyonu kalıcı atamaya çevirir.
 func (s *Store) Confirm(ctx context.Context, id int64, note, actor string) (*Allocation, error) {
 	var out *Allocation
-	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var status string
 		var expired bool
 		err := tx.QueryRow(ctx, `SELECT status, COALESCE(reserved_until <= now(), false) FROM allocations WHERE id = $1 FOR UPDATE`, id).
@@ -402,7 +431,7 @@ func (s *Store) Confirm(ctx context.Context, id int64, note, actor string) (*All
 // hiç kullanılmamış (rezerve/bloklu) değerler hemen, atanmış değerler politikaya göre.
 func (s *Store) Release(ctx context.Context, id int64, note, actor string) (*Allocation, error) {
 	var out *Allocation
-	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var status, policy string
 		var cooldown int
 		err := tx.QueryRow(ctx, `SELECT a.status, p.reuse_policy, p.cooldown_days
@@ -447,7 +476,7 @@ func (s *Store) Release(ctx context.Context, id int64, note, actor string) (*All
 // Block bir değeri dağıtım dışı bırakır (ör. başka sistemde kullanılmış, hasarlı etiket, özel amaç).
 func (s *Store) Block(ctx context.Context, poolID int64, value, note, actor string) (*Allocation, error) {
 	var out *Allocation
-	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		p, err := getPoolTx(ctx, tx, poolID)
 		if err != nil {
 			return err
@@ -692,6 +721,11 @@ func (s *Store) Lookup(ctx context.Context, value string) ([]LookupMatch, error)
 		return nil, err
 	}
 
+	// Zaman karşılaştırması düğümün saatiyle değil veritabanı saatiyle: düğümler arası saat farkı sonucu değiştirmesin.
+	var dbNow time.Time
+	if err := s.db.QueryRow(ctx, `SELECT now()`).Scan(&dbNow); err != nil {
+		return nil, err
+	}
 	out := []LookupMatch{}
 	for _, h := range hits {
 		m := LookupMatch{PoolID: h.pool.ID, PoolCode: h.pool.Code, PoolName: h.pool.Name,
@@ -702,7 +736,7 @@ func (s *Store) Lookup(ctx context.Context, value string) ([]LookupMatch, error)
 		case err == nil:
 			m.Allocation = a
 			m.State = a.Status
-			if a.Status == StatusReleased && a.ReusableAt != nil && !a.ReusableAt.After(time.Now()) {
+			if a.Status == StatusReleased && a.ReusableAt != nil && !a.ReusableAt.After(dbNow) {
 				m.State = "reusable" // daha önce kullanılmış, tekrar dağıtılabilir
 			}
 		case !errors.Is(err, pgx.ErrNoRows):
