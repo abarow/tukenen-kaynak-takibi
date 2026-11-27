@@ -1,3 +1,6 @@
+// Copyright 2026 Mehmet ERGULCU and the abarow contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import type { KindCode, KindInfo, ReusePolicy, Status } from './types';
 
 const nf = new Intl.NumberFormat('tr-TR');

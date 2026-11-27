@@ -1,3 +1,6 @@
+// Copyright 2026 Mehmet ERGULCU and the abarow contributors
+// SPDX-License-Identifier: Apache-2.0
+
 export type KindCode = 'ean13' | 'ean8' | 'isbn13' | 'mac' | 'sequence' | 'custom';
 export type Status = 'reserved' | 'assigned' | 'released' | 'blocked';
 export type ReusePolicy = 'never' | 'cooldown' | 'immediate';

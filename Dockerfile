@@ -1,3 +1,6 @@
+# Copyright 2026 Mehmet ERGULCU and the abarow contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # 1) Arayüz: SvelteKit statik çıktı -> backend/internal/web/dist
 FROM node:24-alpine AS web
 WORKDIR /src/frontend
@@ -17,6 +20,11 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/kaynak ./cmd/serve
 
 # 3) Çalışma imajı
 FROM gcr.io/distroless/static-debian12:nonroot
+LABEL org.opencontainers.image.title="Tükenen Kaynak Takibi" \
+      org.opencontainers.image.vendor="abarow" \
+      org.opencontainers.image.licenses="Apache-2.0"
+# Lisans, NOTICE ve üçüncü taraf bildirimleri imajla birlikte gider.
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES /licenses/
 COPY --from=api /out/kaynak /kaynak
 EXPOSE 8088
 ENTRYPOINT ["/kaynak"]

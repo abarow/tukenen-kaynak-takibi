@@ -1,3 +1,6 @@
+// Copyright 2026 Mehmet ERGULCU and the abarow contributors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package db PostgreSQL bağlantı havuzunu açar ve gömülü migration'ları uygular.
 package db
 

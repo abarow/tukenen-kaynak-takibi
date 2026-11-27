@@ -1,5 +1,7 @@
 # Tükenen Kaynak Takibi
 
+Bir [abarow](https://abarow.com) projesi: açık kaynak, [Apache 2.0](LICENSE) lisanslı.
+
 Barkod numarası aralığı, ISBN bloğu, MAC adresi bloğu, fatura/seri numarası gibi **sayısı sınırlı ve
 tekrar kullanılması riskli** kaynakları nesnelerle (ürün, kitap, cihaz, sanal makine, belge…) eşleştiren ve
 ne kadarının tükendiğini takip eden uygulama: her havuzun kapasitesi, kalan değer sayısı ve azalma uyarısı.
@@ -169,6 +171,62 @@ rezervasyonları arka plan görevi (`SWEEP_INTERVAL`, varsayılan 30 sn) havuza 
 
 **5. Toplu tahsis tek parça.** 1000 nesneye kadar tek istekte; havuz yetmezse hiçbir değer yazılmaz.
 
+### Birden çok sunucu (yatay ölçekleme)
+
+Aynı veritabanına bağlı birden çok sunucu örneği güvenle çalışır; yük dengeleyicide oturum
+yapışkanlığı (sticky session) gerekmez. Bütün koordinasyon PostgreSQL'dedir:
+
+| Konu | Nasıl çözülüyor |
+|---|---|
+| Aynı değer iki nesneye | Satır kilidi + `UNIQUE (pool_id, base_value)`. Kilitler yanılsa bile kısıt izin vermez |
+| Aynı nesne iki değer | Veritabanı advisory lock'u (düğümden bağımsız) + kısmi benzersiz indeks |
+| Çakışan aralık | `EXCLUDE` kısıtı |
+| Kilitlenme (deadlock) | Toplu istek tüm nesne kilitlerini aralık kilidinden önce, sabit sırayla alır. Yine de kilitlenme ya da serileştirme hatası olursa işlem kısa bir beklemeyle 5 kereye kadar tekrar denenir |
+| Migration'lar | Advisory lock: aynı anda açılan düğümlerden yalnızca biri uygular, diğerleri bekler |
+| Rezervasyon süpürücüsü | Her düğümde çalışır; `FOR UPDATE SKIP LOCKED` ile her rezervasyon tam bir kez düşer |
+| Saat farkı | Bütün zaman karşılaştırmaları veritabanı saatiyle (`now()`) yapılır |
+| Düğüm içi durum | Yalnızca özel tiplerin derlenmiş hâli önbelleklenir; tanımlar değişmez olduğu için güvenli |
+
+Bu davranış 3 düğümle yük altında sınandı (yaklaşık 5.500 istek). Senaryolar: eşzamanlı açılış,
+tükenme yarışı, aynı nesneye 60 eşzamanlı istek, örtüşen toplu+tekil istekler, 3 süpürücü,
+kurallı tipte 3.000 tahsis, al-bırak döngüsü. Sonuç: 0 hata, 0 tekrar deneme, veri tutarlılığı
+kontrollerinin hepsi temiz. Kilitlenme senaryosu `TestBulkAndSingleOverlapDoNotDeadlock` ile `go test`'te de var.
+
+Dikkat edilecekler:
+
+- **Bağlantı sayısı:** Her düğüm varsayılan olarak `max(4, CPU sayısı)` bağlantı açar. Toplam,
+  PostgreSQL'in `max_connections` değerini (varsayılan 100) aşmamalı. Sınırlamak için:
+  `DATABASE_URL=...?sslmode=disable&pool_max_conns=10`.
+- **Tek havuzun hızı düğüm sayısıyla artmaz:** Bir havuzdan yeni değer almak, aralık satırının kilidinde
+  sıraya girer (değerin iki kez verilmemesinin bedeli). Farklı havuzlar paralel çalışır. Toplu istek, bütün
+  kalemleri bitene kadar o havuzun aralığını tutar.
+- **Sürüm güncellemesi:** Bütün düğümler aynı sürümü çalıştırmalı. Migration'lar eski sürümle uyumlu
+  olmak zorunda değil (ör. 005 fonksiyon adlarını değiştirir). Önce düğümleri durdurun, sonra yeni
+  sürümü başlatın. Kademeli (rolling) güncelleme için migration'ların geriye uyumlu yazılması gerekir.
+
+## Ölçümler: hafif ve hızlı
+
+Docker imajı (26 MB, indirmesi 6 MB), aynı Docker ağında PostgreSQL 18 ve ayrı bir deneme veritabanıyla ölçüldü.
+Yük: 32 eşzamanlı istemci, üç havuz (EAN-13, MAC, kurallı ürün kimliği); 6.000 tekil tahsis, 2.000 tekrar istek,
+2.000 sorgu ve 5 × 1000 nesnelik toplu tahsis. Aynı yük bir kez sınırsız, bir kez 1 çekirdek + 32 MB bellek sınırıyla çalıştırıldı.
+
+| | Sınırsız | 1 çekirdek + 32 MB |
+|---|---|---|
+| Bellek, boşta | 3,2 MiB | 2,4 MiB |
+| Bellek, yük altında (ortalama / en çok) | 16,6 / 20,1 MiB | 13,0 / 14,8 MiB |
+| CPU, yük altında (ortalama, tek çekirdeğin yüzdesi) | %106 | %72 |
+| Açılış (ilk, migration'larla / sonraki) | 1,1 / 0,4 sn | 0,9 / 0,5 sn |
+| Tekil tahsis: istek/sn, ortanca, p95 | 569, 41 ms, 145 ms | 471, 57 ms, 183 ms |
+| Aynı nesne tekrar: istek/sn, ortanca | 1.603, 18 ms | 1.047, 21 ms |
+| Değer sorgusu (`/api/lookup`): istek/sn, ortanca | 2.136, 14 ms | 1.313, 15 ms |
+| Toplu tahsis, 1000 nesne | ≈3,1 sn | ≈3,1 sn |
+| Hata / iki kez verilen değer | 0 / 0 | 0 / 0 |
+
+Geliştirici bilgisayarında (Docker Desktop, WSL2, 16 mantıksal CPU) 27.11.2026'da tek çalıştırmayla ölçüldü; bellek ve CPU
+uygulama container'ınındır, PostgreSQL dahil değildir. Başka donanım için garanti değildir. Uygulama veritabanına
+Docker Desktop'ın `host.docker.internal` köprüsünden bağlanınca ara sıra 30 saniyelik takılmalar görüldü; ölçümler
+uygulama ve veritabanı aynı Docker ağındayken alındı (gerçek kurulumdaki gibi).
+
 ## Çalıştırma
 
 ### Geliştirme
@@ -205,6 +263,8 @@ docker compose --profile app up --build # db + uygulama, http://localhost:8088
 | `DATABASE_URL` | `postgres://kaynak:kaynak@localhost:5433/kaynak?sslmode=disable` |
 | `HTTP_ADDR` | `:8088` |
 | `SWEEP_INTERVAL` | `30s` |
+
+Bağlantı havuzu ayarları `DATABASE_URL` içinde verilir, ör. `&pool_max_conns=10` (bkz. birden çok sunucu).
 
 ### Testler
 
@@ -287,6 +347,9 @@ backend/
 frontend/
   src/routes/            Pano, Havuzlar, Havuz detayı, Tahsisler, Kod tipleri, Doğrula & Sorgula
   src/lib/               API istemcisi, tipler, bileşenler
+scripts/
+  check-headers.sh       her kaynak dosyada telif ve SPDX başlığı var mı
+  third-party-notices.mjs  THIRD_PARTY_NOTICES: ikili dosyaya ve arayüze giren bağımlılıkların lisansları
 ```
 
 ## Bilinçli olarak dışarıda bırakılanlar
@@ -304,3 +367,15 @@ frontend/
 - **Çok büyük havuzlarda istatistik**: sayımlar her istekte `count(*) FILTER` ile hesaplanıyor. Milyonlarca
   dokunulmuş değerde bir sayaç tablosuna geçilmeli.
 - Belirli bir değerin önüne çok sayıda blok/elle tahsis yığılırsa imleç bunları tek tek atlar.
+
+## Katkı
+
+Katkı kuralları (commit imzası, dosya başlıkları, bağımlılık lisansları) [CONTRIBUTING.md](CONTRIBUTING.md) dosyasında. Katkı yapan herkes adını [AUTHORS](AUTHORS) dosyasına ekleyebilir.
+
+## Lisans
+
+Tükenen Kaynak Takibi, [Apache License 2.0](LICENSE) ile lisanslıdır. Sunucu ikili dosyasına ve arayüze giren üçüncü taraf bileşenlerin lisansları [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) dosyasındadır; Docker imajı bu dosyaları `/licenses/` altında taşır.
+
+Copyright 2026 Mehmet ERGULCU and the abarow contributors
+
+Yazılım, lisansta belirtildiği gibi "olduğu gibi" (AS IS), hiçbir garanti olmaksızın sunulur.

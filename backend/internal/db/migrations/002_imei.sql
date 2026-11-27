@@ -1,3 +1,6 @@
+-- Copyright 2026 Mehmet ERGULCU and the abarow contributors
+-- SPDX-License-Identifier: Apache-2.0
+
 -- TCKN tipi kaldırıldı; yerine IMEI (mobil cihaz kimliği, Luhn kontrol hanesi) eklendi.
 --
 -- 001 zaten uygulanmış veritabanları için CHECK kısıtını günceller. TCKN tipinde

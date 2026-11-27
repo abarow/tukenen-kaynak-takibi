@@ -1,3 +1,6 @@
+-- Copyright 2026 Mehmet ERGULCU and the abarow contributors
+-- SPDX-License-Identifier: Apache-2.0
+
 -- IMEI tipi kaldırıldı; yerine MAC adresi (EUI-48: onaltılık, I/G ve U/L bit kuralları) eklendi.
 -- 48 bitlik adres bigint'e sığar; pool_ranges ve allocations şeması değişmez.
 

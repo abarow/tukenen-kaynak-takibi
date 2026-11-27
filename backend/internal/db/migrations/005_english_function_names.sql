@@ -1,3 +1,6 @@
+-- Copyright 2026 Mehmet ERGULCU and the abarow contributors
+-- SPDX-License-Identifier: Apache-2.0
+
 -- Kural fonksiyonlarının adları İngilizceye çevrildi:
 --   hane → digit, toplam → digitSum, sayi → number, gruplar → chunks, agirlikli → weightedSum
 --

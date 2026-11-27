@@ -1,3 +1,6 @@
+<!-- Copyright 2026 Mehmet ERGULCU and the abarow contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 <script lang="ts">
 	import { page } from '$app/state';
 	import UsageBar from '#lib/components/UsageBar.svelte';

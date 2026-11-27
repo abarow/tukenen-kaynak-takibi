@@ -1,3 +1,6 @@
+// Copyright 2026 Mehmet ERGULCU and the abarow contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { error } from '@sveltejs/kit';
 import { actor } from './actor.svelte';
 import type {

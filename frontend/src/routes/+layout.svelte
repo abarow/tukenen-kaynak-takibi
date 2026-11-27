@@ -1,3 +1,6 @@
+<!-- Copyright 2026 Mehmet ERGULCU and the abarow contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 <script lang="ts">
 	import '../app.css';
 	import favicon from '#lib/assets/favicon.svg';
@@ -24,7 +27,7 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>Tükenen Kaynak Takibi</title>
+	<title>Tükenen Kaynak Takibi · abarow</title>
 </svelte:head>
 
 <div class="shell">
@@ -38,7 +41,7 @@
 				<rect x="17" y="5" width="2" height="14" fill="currentColor" />
 				<rect x="21" y="5" width="1" height="14" fill="currentColor" />
 			</svg>
-			<span>Tükenen Kaynak Takibi</span>
+			<span>Tükenen Kaynak Takibi<small>abarow</small></span>
 		</a>
 		<nav>
 			{#each nav as item (item.href)}
@@ -103,6 +106,13 @@
 	}
 	.brand svg {
 		flex: none;
+	}
+	.brand small {
+		display: block;
+		margin-top: 2px;
+		font: 600 11px/1.3 ui-monospace, 'Cascadia Mono', Consolas, monospace;
+		letter-spacing: 0.04em;
+		color: var(--muted);
 	}
 	nav {
 		display: flex;

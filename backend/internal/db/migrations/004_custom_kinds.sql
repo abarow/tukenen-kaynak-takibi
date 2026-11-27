@@ -1,3 +1,6 @@
+-- Copyright 2026 Mehmet ERGULCU and the abarow contributors
+-- SPDX-License-Identifier: Apache-2.0
+
 -- Kullanıcı tanımlı kod tipleri (ör. kurallı ürün kimliği).
 --
 -- Tanım oluşturulduktan sonra değişmez: algoritma değişirse daha önce verilmiş

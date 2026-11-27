@@ -1,3 +1,6 @@
+<!-- Copyright 2026 Mehmet ERGULCU and the abarow contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 <script lang="ts">
 	import { api } from '#lib/api.ts';
 	import StatusBadge from '#lib/components/StatusBadge.svelte';
